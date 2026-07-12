@@ -1,0 +1,11 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+bcrypt>=4.0.0
+PyJWT>=2.8.0
+# crawler.py 仅依赖 Python 标准库(xml.etree, urllib, re, sqlite3, hashlib, argparse)
+# nlp_analysis.py 依赖:
+jieba>=0.42.1
+scikit-learn>=1.3.0
+# routes.py 智能问答依赖:
+httpx>=0.25.0
