@@ -13,15 +13,14 @@ venv/
 .venv/
 env/
 
-# Database
+# Database & Data
+data/
 *.db
 *.sqlite
 *.sqlite3
-data/sentiment.db
 app/data/
 
 # Logs
-data/logs/
 *.log
 
 # Frontend

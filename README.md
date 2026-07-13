@@ -44,6 +44,15 @@
 - 热度走势预判
 - 处置建议生成
 
+### 用户画像洞察
+
+- 传播参与用户四分类：水军 / 营销号 / 普通网民 / 行业利益方
+- 多维度画像分析：地域分布、兴趣圈层、年龄段、品牌人群分层
+- 传播图谱可视化（ECharts 力导向图）
+- 模糊账号复核面板（支持隐藏水军节点）
+- 基于 DeepSeek LLM 的逼真虚拟用户生成（用户名、简介、评论内容）
+- 画像结果一键导出图片
+
 ### 智能问答
 
 - 基于语义搜索的智能问答
@@ -54,6 +63,7 @@
 - 舆情看板（Dashboard）：总体统计和趋势图
 - 事件看板（Event Board）：事件列表、排序、筛选
 - 事件详情：关联新闻、可信度评分、传播链路、关键词标签
+- 用户画像：传播参与者四分类、地域/兴趣/年龄画像、传播图谱、模糊账号复核
 - 数据采集页：一键采集、任务管理、采集统计
 - 个人中心：关注平台/关键词配置
 
@@ -65,7 +75,8 @@ sentiment_analysis/
 │   ├── api/                # API 路由
 │   │   ├── auth.py         # 认证鉴权
 │   │   ├── routes.py       # 核心业务路由
-│   │   └── crawler_api.py   # 爬虫管理路由
+│   │   ├── crawler_api.py  # 爬虫管理路由
+│   │   └── user_profile_api.py  # 用户画像分析路由
 │   ├── core/               # 核心模块
 │   │   ├── auth.py         # JWT 认证
 │   │   └── database.py     # 数据库管理
@@ -81,7 +92,9 @@ sentiment_analysis/
 │   │   ├── heat_predictor.py     # 热度预判
 │   │   ├── emotion_analyzer.py   # 情绪量化
 │   │   ├── action_advisor.py     # 处置建议
-│   │   └── event_summarizer.py   # 事件摘要
+│   │   ├── event_summarizer.py   # 事件摘要
+│   │   ├── user_profile_analyzer.py  # 用户画像分析（四分类 + 多维度画像）
+│   │   └── llm_user_generator.py     # DeepSeek LLM 虚拟用户生成
 │   └── schemas/           # 数据模式
 ├── crawler/                # 爬虫模块
 │   ├── adapters/           # 平台适配器
@@ -131,9 +144,14 @@ npm install
 
 1. 抖音数据源使用 apihz.cn 免费 API，需注册获取 id 和 key，替换 `crawler/adapters/douyin.py` 中的默认值
 2. 语义模型（sentence-transformers）首次运行会自动下载，国内网络建议设置镜像：
-   ```python
+   ```bash
    export HF_ENDPOINT=https://hf-mirror.com
    ```
+3. （可选）用户画像模块支持 DeepSeek LLM 生成逼真虚拟用户，需配置 API Key：
+   ```bash
+   export DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+   不配置则使用本地模板生成，逼真度略低
 
 ### 启动
 
@@ -183,6 +201,7 @@ python -m crawler.cli --platform weibo --task-type keyword --keyword "AI"
 | DBSCAN | scikit-learn | 基于密度的新闻聚类 |
 | TF-IDF | jieba.analyse | 关键词提取与特征表示 |
 | 语义搜索 | 余弦相似度 | 智能问答、事件关联 |
+| DeepSeek LLM | deepseek-chat | 逼真虚拟用户数据生成 |
 
 ## License
 

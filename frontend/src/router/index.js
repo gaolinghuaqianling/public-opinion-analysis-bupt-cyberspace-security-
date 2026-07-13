@@ -47,6 +47,12 @@ const routes = [
     component: () => import('@/views/ProfileView.vue'),
     meta: { title: '个人中心', icon: 'User' },
   },
+  {
+    path: '/user-profile',
+    name: 'UserProfile',
+    component: () => import('@/views/UserProfileView.vue'),
+    meta: { title: '用户画像', icon: 'UserFilled' },
+  },
 ]
 
 const router = createRouter({

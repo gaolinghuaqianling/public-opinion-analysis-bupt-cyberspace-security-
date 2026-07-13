@@ -52,6 +52,11 @@
           <el-icon><User /></el-icon>
           <template #title>个人中心</template>
         </el-menu-item>
+
+        <el-menu-item index="/user-profile">
+          <el-icon><UserFilled /></el-icon>
+          <template #title>用户画像</template>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

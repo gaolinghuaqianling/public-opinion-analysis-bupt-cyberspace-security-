@@ -74,3 +74,40 @@ CREATE INDEX IF NOT EXISTS idx_hot_event_heat    ON hot_event(heat_score DESC);
 CREATE INDEX IF NOT EXISTS idx_hot_event_risk    ON hot_event(risk_level);
 CREATE INDEX IF NOT EXISTS idx_event_analysis_ev ON event_analysis(event_id);
 CREATE INDEX IF NOT EXISTS idx_spread_info_ev    ON spread_info(event_id);
+
+-- 6. 传播参与用户表（舆情参与用户画像洞察）
+CREATE TABLE IF NOT EXISTS spread_user (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    user_name TEXT NOT NULL,
+    user_id TEXT,
+    platform TEXT NOT NULL,
+    ip_location TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    register_date TEXT DEFAULT '',
+    followers_count INTEGER DEFAULT 0,
+    following_count INTEGER DEFAULT 0,
+    posts_count INTEGER DEFAULT 0,
+    avatar_hash TEXT DEFAULT '',
+    nickname_hash TEXT DEFAULT '',
+    FOREIGN KEY (event_id) REFERENCES hot_event(id)
+);
+
+-- 7. 用户历史内容表（用于画像分析）
+CREATE TABLE IF NOT EXISTS user_content (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_name TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    content_type TEXT DEFAULT 'post',
+    content TEXT NOT NULL,
+    keywords TEXT DEFAULT '[]',
+    published_at TEXT DEFAULT '',
+    likes INTEGER DEFAULT 0,
+    reposts INTEGER DEFAULT 0,
+    comments INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_spread_user_event    ON spread_user(event_id);
+CREATE INDEX IF NOT EXISTS idx_spread_user_platform ON spread_user(platform);
+CREATE INDEX IF NOT EXISTS idx_user_content_user    ON user_content(user_name);
+CREATE INDEX IF NOT EXISTS idx_user_content_platform ON user_content(platform);
