@@ -165,9 +165,6 @@ cd sentiment_analysis/frontend
 npm run dev
 ```
 
-### 访问
-
-打开浏览器访问 http://localhost:5173，默认账号 admin，密码 admin123
 
 ## 使用指南
 
