@@ -119,7 +119,6 @@ sentiment_analysis/
 │   │   ├── emotion_analyzer.py   # 情绪量化分析
 │   │   ├── action_advisor.py     # 处置建议生成
 │   │   ├── user_profile_analyzer.py  # 用户画像分析（四分类 + 多维度画像）
-│   │   ├── llm_user_generator.py     # DeepSeek LLM 虚拟用户生成
 │   │   └── report_generator.py      # 报表数据聚合 + Word 文档生成
 │   └── schemas/           # 数据模式
 ├── crawler/                # 爬虫模块
