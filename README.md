@@ -11,7 +11,7 @@
 | 后端 | Python 3.10+ / FastAPI / SQLite / jieba / sentence-transformers / scikit-learn |
 | 前端 | Vue 3 / Element Plus / ECharts / Axios |
 | 爬虫 | Playwright / urllib（多平台适配器架构） |
-| LLM | DeepSeek API（事件概述、情感分析、平台分布推算、虚拟用户生成） |
+| LLM | DeepSeek API（事件概述、情感分析、平台分布推算） |
 
 ## 功能特性
 
