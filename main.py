@@ -16,6 +16,7 @@ from app.api.spread import router as spread_router
 from app.api.routes import router as routes_router
 from app.api.crawler_api import router as crawler_router
 from app.api.user_profile_api import router as user_profile_router
+from app.api.report_api import router as report_router
 
 
 @asynccontextmanager
@@ -54,6 +55,7 @@ app.include_router(spread_router,  prefix="/api")
 app.include_router(routes_router, prefix="/api")
 app.include_router(crawler_router, prefix="/api")
 app.include_router(user_profile_router, prefix="/api")
+app.include_router(report_router, prefix="/api")
 
 
 @app.get("/", tags=["系统"])

@@ -247,6 +247,15 @@ def extract_structured_summary(title: str, content: str) -> Dict[str, object]:
             "summary_text":   str,          # 组合后的结构化摘要文本
         }
     """
+    # 如果 content 是 JSON 数据而非自然语言文本，清空它
+    import json
+    if content and content.strip().startswith("{"):
+        try:
+            json.loads(content)
+            content = ""  # 是 JSON 数据，不作为文本使用
+        except Exception:
+            pass
+
     full_text = f"{title} {content}" if content else title
 
     # 提取各维度
@@ -269,7 +278,7 @@ def extract_structured_summary(title: str, content: str) -> Dict[str, object]:
     if cause_info:
         parts.append(f"【概述】{cause_info}")
 
-    summary_text = " ".join(parts) if parts else (content[:200] if content else title)
+    summary_text = " ".join(parts) if parts else title
 
     result = {
         "time": time_info,
@@ -284,3 +293,53 @@ def extract_structured_summary(title: str, content: str) -> Dict[str, object]:
                  time_info, locations, people_list)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# LLM 自动生成事件概述（纯文字总结，无 JSON、无标签）
+# ---------------------------------------------------------------------------
+def generate_llm_summary(title: str, content: str = "") -> str:
+    """
+    调用 DeepSeek LLM 为事件生成一段纯文字概述。
+    任何事件都应该有概述，绝不返回 JSON 或关键词标签。
+    """
+    import os
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        # 无 API Key 时返回降级文本
+        return f"关于"{title}"的事件正在持续关注中。"
+
+    # 清理 content：如果是 JSON 则清空
+    if content and content.strip().startswith("{"):
+        try:
+            import json as _json
+            _json.loads(content)
+            content = ""
+        except Exception:
+            pass
+
+    snippet = (content or "")[:300]
+    try:
+        import requests
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": "你是一个新闻摘要专家。只输出一段中文，不要任何标签、不要JSON、不要关键词列表。"},
+                    {"role": "user", "content": f"请用2-3句连贯的中文概括以下新闻事件的核心内容。\n\n标题：{title}\n内容：{snippet}\n\n要求：\n1. 只输出一段纯文字，不要任何标签如【时间】【地点】\n2. 不要输出 JSON 或关键词\n3. 内容不能和标题重复，要补充细节\n4. 客观中立\n\n概述："},
+                ],
+                "max_tokens": 200,
+                "temperature": 0.3,
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            text = resp.json()["choices"][0]["message"]["content"].strip()
+            if text and not text.startswith("{"):
+                return text
+    except Exception as e:
+        logger.warning("LLM 概述生成失败: %s", e)
+
+    return f"关于"{title}"的事件正在持续关注中。"

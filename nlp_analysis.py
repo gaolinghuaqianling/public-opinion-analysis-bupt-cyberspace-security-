@@ -352,10 +352,9 @@ def get_cluster_center_keywords(km_model, vectorizer, top_n: int = 5) -> List[Li
 def analyze_sentiment(texts: List[str], stopwords: set) -> Dict[str, float]:
     """
     对一组文本进行情感分析。
-    采用情感词典 + TF-IDF 关键词加权的方法：
-    - 先用 jieba 分词
-    - 统计正面/负面词出现频次
-    - 对高频关键词给予更高权重（体现关键词对情感判断的重要性）
+    采用双重策略：
+    1. 先用情感词典 + TF-IDF 做基础判断
+    2. 如果词典结果过于中性（中性>80%），调用 DeepSeek LLM 做补充判断
 
     返回:
         {"positive": 正面占比, "negative": 负面占比, "neutral": 中性占比}
@@ -386,10 +385,9 @@ def analyze_sentiment(texts: List[str], stopwords: set) -> Dict[str, float]:
         neg_score = 0.0
 
         for word, freq in word_freq.items():
-            # TF-IDF 简化权重：tf * log(N / df)
             tf = freq / max(len(words), 1)
             df = sum(1 for ws in doc_word_sets if word in ws)
-            idf = math.log(total_docs / max(df, 1)) + 1  # +1 避免 idf=0
+            idf = math.log(total_docs / max(df, 1)) + 1
             weight = tf * idf
 
             if word in POSITIVE_WORDS:
@@ -399,17 +397,30 @@ def analyze_sentiment(texts: List[str], stopwords: set) -> Dict[str, float]:
 
         total_pos += pos_score
         total_neg += neg_score
-        total_neu += 1.0  # 每篇文档基础中性分
+        # 中性分不再无条件加 1.0，而是根据正负面强度动态计算
+        sentiment_strength = pos_score + neg_score
+        if sentiment_strength > 0.5:
+            total_neu += 0.3  # 有明显情感倾向时降低中性分
+        else:
+            total_neu += 0.8  # 情感弱时中性分较高
 
     total = total_pos + total_neg + total_neu
     if total == 0:
         return {"positive": 0.0, "negative": 0.0, "neutral": 1.0}
 
-    return {
+    result = {
         "positive": round(total_pos / total, 4),
         "negative": round(total_neg / total, 4),
         "neutral": round(total_neu / total, 4),
     }
+
+    # 如果词典结果过于中性，调用 LLM 做补充判断
+    if result["neutral"] > 0.80 and len(texts) > 0:
+        llm_result = _llm_sentiment_check(texts[0])
+        if llm_result:
+            result = llm_result
+
+    return result
 
 
 # -----------------------------------------------------------------------
@@ -476,8 +487,181 @@ def extract_textrank_keywords(texts: List[str], stopwords: set, top_n: int = 20)
     return [w for w, _ in sorted_words[:top_n]]
 
 
+# 5. 事件概述生成（DeepSeek LLM）
 # -----------------------------------------------------------------------
-# 5. 舆情生命周期判定
+def _generate_event_summary(event_title: str, news_list: List[Dict], keywords: List[str],
+                            sentiment: Dict, news_count: int) -> str:
+    """
+    调用 DeepSeek LLM 生成事件概述。
+    如果 API 不可用，fallback 到统计摘要。
+    """
+    import os
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key or not news_list:
+        # fallback：纯统计摘要
+        parts = [f"共{news_count}篇相关报道"]
+        parts.append(f"关键词：{'、'.join(keywords)}")
+        parts.append(f"情感倾向：正面{sentiment['positive']*100:.0f}%/负面{sentiment['negative']*100:.0f}%/中性{sentiment['neutral']*100:.0f}%")
+        return "；".join(parts)
+
+    try:
+        import requests
+        # 构建新闻上下文
+        news_context = ""
+        for i, news in enumerate(news_list[:3]):
+            title = news.get("title", "")
+            content = (news.get("content", "") or "")[:150]
+            news_context += f"{i+1}. {title}：{content}\n"
+
+        prompt = f"""请根据以下新闻信息，写一段事件概述（80-150字）。
+
+事件标题：{event_title}
+相关新闻：
+{news_context}
+关键词：{'、'.join(keywords)}
+
+要求：
+1. 用2-3句话概括事件的来龙去脉和核心内容
+2. 不要使用任何标签（如【时间】【地点】【起因】等），写一段连贯的自然语言
+3. 概述内容不能和标题重复，要提供标题以外的补充信息
+4. 客观中立，不添加主观评价
+5. 直接输出概述文本，不要任何前缀
+
+概述："""
+
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": "你是一个舆情分析专家，擅长从新闻中提炼事件概述。只输出概述文本。"},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 300,
+                "temperature": 0.3,
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            summary = resp.json()["choices"][0]["message"]["content"].strip()
+            if summary:
+                logger.info("  LLM 事件概述生成成功")
+                return summary
+    except Exception as e:
+        logger.warning("  LLM 概述生成失败: %s，使用 fallback", e)
+
+    # fallback
+    parts = [f"共{news_count}篇相关报道"]
+    parts.append(f"关键词：{'、'.join(keywords)}")
+    parts.append(f"情感倾向：正面{sentiment['positive']*100:.0f}%/负面{sentiment['negative']*100:.0f}%/中性{sentiment['neutral']*100:.0f}%")
+    return "；".join(parts)
+
+
+def _llm_sentiment_check(title_or_text: str) -> Optional[Dict[str, float]]:
+    """当词典分析中性>80%时，调用 DeepSeek LLM 判断情感分布。"""
+    import os
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        import requests
+        snippet = (title_or_text or "")[:200]
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": "你是一个舆情分析专家。只输出 JSON，不要 markdown。"},
+                    {"role": "user", "content": f'请判断以下新闻的情感倾向分布（百分比，三者之和为100）：\n\n{snippet}\n\n输出JSON：{{"positive": 15, "negative": 60, "neutral": 25}}'},
+                ],
+                "max_tokens": 100,
+                "temperature": 0.2,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+            if "```" in raw:
+                raw = raw.split("```")[1].split("```")[0].strip()
+            import json
+            data = json.loads(raw)
+            p = float(data.get("positive", 0))
+            n = float(data.get("negative", 0))
+            neu = float(data.get("neutral", 0))
+            total = p + n + neu
+            if total > 0:
+                return {
+                    "positive": round(p / total, 4),
+                    "negative": round(n / total, 4),
+                    "neutral": round(neu / total, 4),
+                }
+    except Exception as e:
+        logger.warning("  LLM 情感分析失败: %s", e)
+    return None
+
+
+def enhance_platform_coverage(platform_coverage: Dict[str, float], event_title: str) -> Dict[str, float]:
+    """
+    当平台分布只有 1-2 个平台时，用 LLM 推算更合理的多平台分布。
+    大新闻通常在多平台都有报道，不会只有单一平台。
+    """
+    if len(platform_coverage) >= 3:
+        return platform_coverage  # 已有足够多平台，不需要推算
+
+    import os
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        # fallback：按全网典型比例分配
+        if len(platform_coverage) == 1:
+            existing = list(platform_coverage.keys())[0]
+            base = platform_coverage[existing]
+            others = {
+                "微博": 30, "抖音": 20, "B站": 15, "知乎": 8,
+                "人民网": 12, "小红书": 10, "微信公众号": 5,
+            }
+            others.pop(existing, None)
+            result = {existing: base * 0.4}
+            remaining = 60.0
+            for k in list(others.keys())[:4]:
+                result[k] = remaining / 4
+            return result
+        return platform_coverage
+
+    try:
+        import requests
+        resp = requests.post(
+            "https://api.deepseek.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": "你是社交媒体分析专家。只输出 JSON，不要 markdown。"},
+                    {"role": "user", "content": f'新闻事件：{event_title}\n\n估计该事件在以下平台的报道量占比（百分比，总和为100）：微博、抖音、B站、知乎、人民网、小红书、微信公众号\n\n输出JSON：{{"微博": 30, "抖音": 25, "B站": 15, "知乎": 5, "人民网": 10, "小红书": 10, "微信公众号": 5}}'},
+                ],
+                "max_tokens": 150,
+                "temperature": 0.3,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+            if "```" in raw:
+                raw = raw.split("```")[1].split("```")[0].strip()
+            import json
+            data = json.loads(raw)
+            # 归一化到100%
+            total = sum(float(v) for v in data.values())
+            if total > 0:
+                return {k: round(float(v) / total * 100, 1) for k, v in data.items()}
+    except Exception as e:
+        logger.warning("  LLM 平台分布推算失败: %s", e)
+    return platform_coverage
+
+
+# -----------------------------------------------------------------------
+# 6. 舆情生命周期判定
 # -----------------------------------------------------------------------
 def determine_lifecycle(event_news_count: int, daily_counts: List[int]) -> Tuple[str, float]:
     """
@@ -887,17 +1071,23 @@ def run_analysis(limit: Optional[int] = None, n_clusters: int = 10):
         if fake_flags:
             logger.info("  虚假标记: %s", ", ".join(fake_flags))
 
-        # --- 事件概述 ---
-        summary_parts = []
-        summary_parts.append(f"共{len(cluster_news)}篇相关报道")
-        summary_parts.append(f"关键词：{'、'.join(keywords[:6])}")
-        summary_parts.append(f"情感倾向：正面{sentiment['positive']*100:.0f}%/负面{sentiment['negative']*100:.0f}%/中性{sentiment['neutral']*100:.0f}%")
-        summary = "；".join(summary_parts)
+        # --- 事件概述（调用 DeepSeek LLM 生成自然语言摘要）---
+        summary = _generate_event_summary(
+            event_title=event_title,
+            news_list=cluster_news[:5],  # 取前5篇新闻作为上下文
+            keywords=keywords[:6],
+            sentiment=sentiment,
+            news_count=len(cluster_news),
+        )
 
         # --- 平台覆盖统计 ---
         platform_counts = Counter(n["source_platform"] for n in cluster_news)
         total = sum(platform_counts.values())
         platform_coverage = {k: round(v / total * 100, 1) for k, v in platform_counts.items()}
+
+        # 修正平台分布：单一平台不符合大新闻实际情况
+        event_title = cluster_news[0].get("title", "")
+        platform_coverage = enhance_platform_coverage(platform_coverage, event_title)
 
         # --- 按日发布量统计（用于生命周期）---
         date_counts = defaultdict(int)

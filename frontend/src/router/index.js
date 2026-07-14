@@ -42,6 +42,12 @@ const routes = [
     meta: { title: '数据采集', icon: 'FolderOpened' },
   },
   {
+    path: '/report',
+    name: 'Report',
+    component: () => import('@/views/ReportView.vue'),
+    meta: { title: '报表导出', icon: 'Download' },
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/ProfileView.vue'),

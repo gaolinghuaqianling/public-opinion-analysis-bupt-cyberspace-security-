@@ -259,6 +259,39 @@ def event_full_analysis(event_id: int, _user: dict = Depends(get_current_user)):
             "action_advice": None,
         }
 
+        # 解析 interaction_data 并清理 summary
+        import re
+        ev = result["event"]
+        summary = ev.get("summary", "")
+        interaction_data = None
+        if summary:
+            # 从 summary 中提取 interaction_data JSON
+            json_match = re.search(r'\{.*"interaction_data".*\}', summary, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                    if isinstance(parsed, dict) and "interaction_data" in parsed:
+                        interaction_data = parsed["interaction_data"]
+                        # 清理 summary：去掉 JSON 部分
+                        cleaned = summary[:json_match.start()].strip()
+                        cleaned = re.sub(r'【概述】\s*$', '', cleaned).strip()
+                        # 去掉【地点】【相关】等标签
+                        cleaned = re.sub(r'【[^】]+】\s*', '', cleaned).strip()
+                        ev["summary"] = cleaned
+                except Exception:
+                    pass
+            # 纯 JSON 的情况
+            elif summary.strip().startswith("{"):
+                try:
+                    parsed = json.loads(summary)
+                    if isinstance(parsed, dict) and "interaction_data" in parsed:
+                        interaction_data = parsed["interaction_data"]
+                        ev["summary"] = ""
+                except Exception:
+                    pass
+        if interaction_data is not None:
+            ev["interaction_data"] = interaction_data
+
         # 2. 情感分析详情
         analysis = conn.execute(
             "SELECT * FROM event_analysis WHERE event_id = ? ORDER BY analyzed_at DESC LIMIT 1",

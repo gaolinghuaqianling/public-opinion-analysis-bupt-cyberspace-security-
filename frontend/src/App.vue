@@ -48,6 +48,11 @@
           <template #title>数据采集</template>
         </el-menu-item>
 
+        <el-menu-item index="/report">
+          <el-icon><Download /></el-icon>
+          <template #title>报表导出</template>
+        </el-menu-item>
+
         <el-menu-item index="/profile">
           <el-icon><User /></el-icon>
           <template #title>个人中心</template>
@@ -159,6 +164,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Fold, Expand, Search, FullScreen, Bell, UserFilled,
   ArrowDown, Setting, SwitchButton, HomeFilled, FolderOpened,
+  Download,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

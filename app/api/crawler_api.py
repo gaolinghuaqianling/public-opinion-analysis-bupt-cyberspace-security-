@@ -203,14 +203,13 @@ def _promote_to_hot_events(platform: str) -> int:
             content = row["content"] or ""
             heat = min(100, 30 + len(content) // 20)
 
-            # 截取摘要（使用结构化信息提取）
+            # 生成事件概述（优先 LLM，保证是纯文字）
             try:
-                from app.services.event_summarizer import extract_structured_summary
-                struct = extract_structured_summary(title.strip(), content)
-                summary = struct["summary_text"]
+                from app.services.event_summarizer import generate_llm_summary
+                summary = generate_llm_summary(title.strip(), content)
             except Exception as e:
-                logger.warning("结构化摘要提取失败，降级为截取: %s", e)
-                summary = content[:200].strip() if content else ""
+                logger.warning("LLM 概述生成失败，降级为标题: %s", e)
+                summary = title.strip()
 
             # 使用新闻发布时间，如果没有则用当前时间
             created = row["published_at"] or now

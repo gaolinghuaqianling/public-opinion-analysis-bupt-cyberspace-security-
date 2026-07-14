@@ -34,14 +34,86 @@
 
       <el-divider />
 
-      <div class="event-summary-text">
-        <el-icon :size="16" color="#409eff"><InfoFilled /></el-icon>
-        <span v-html="formattedSummary"></span>
+      <!-- 概述文本区域（支持编辑） -->
+      <div class="summary-text-area">
+        <!-- 非编辑模式 -->
+        <template v-if="!isEditingSummary">
+          <div class="event-summary-text">
+            <el-icon :size="16" color="#409eff"><InfoFilled /></el-icon>
+            <span v-if="cleanSummary" v-html="cleanSummary"></span>
+            <span v-else class="no-summary-hint">暂无概述，点击编辑按钮添加</span>
+          </div>
+          <div class="summary-edit-row">
+            <el-button type="primary" link size="small" @click="startEditSummary">
+              <el-icon><Edit /></el-icon> 编辑
+            </el-button>
+          </div>
+        </template>
+        <!-- 编辑模式 -->
+        <template v-else>
+          <el-input
+            v-model="editingSummaryText"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            placeholder="请输入事件概述..."
+            class="summary-edit-input"
+          />
+          <div class="summary-edit-actions">
+            <el-button type="primary" size="small" :loading="savingSummary" @click="saveSummary">
+              <el-icon><Check /></el-icon> 保存
+            </el-button>
+            <el-button size="small" @click="cancelEditSummary">取消</el-button>
+          </div>
+        </template>
       </div>
 
       <div class="event-meta">
         <span><el-icon><Clock /></el-icon> 创建: {{ eventData.created_at }}</span>
         <span><el-icon><Refresh /></el-icon> 更新: {{ eventData.updated_at }}</span>
+      </div>
+    </el-card>
+
+    <!-- ====== 交互数据指标卡片 ====== -->
+    <el-card v-if="interactionData" shadow="hover" class="interaction-card">
+      <template #header>
+        <span class="card-title"><el-icon><DataAnalysis /></el-icon> 交互数据指标</span>
+      </template>
+      <div class="interaction-metrics-grid">
+        <!-- 热度值 -->
+        <div class="interaction-metric-item heat-metric">
+          <div class="metric-label">热度值</div>
+          <div class="metric-value heat-value">{{ formatHeat(interactionData.heat) }}</div>
+          <div class="metric-sub" v-if="interactionData.heat != null">原始值: {{ interactionData.heat.toLocaleString() }}</div>
+        </div>
+        <!-- 情感标签 -->
+        <div class="interaction-metric-item">
+          <div class="metric-label">情感标签</div>
+          <el-tag
+            :type="sentimentTagType(interactionData.label)"
+            :effect="'dark'"
+            size="large"
+            class="metric-tag"
+          >
+            {{ sentimentTagLabel(interactionData.label) }}
+          </el-tag>
+        </div>
+        <!-- 来源渠道 -->
+        <div class="interaction-metric-item" v-if="interactionData.source != null">
+          <div class="metric-label">来源渠道</div>
+          <el-tag
+            type="info"
+            effect="plain"
+            size="large"
+            class="metric-tag"
+          >
+            {{ sourceTagLabel(interactionData.source) }}
+          </el-tag>
+        </div>
+        <!-- 视频数量 -->
+        <div class="interaction-metric-item" v-if="interactionData.video_count != null">
+          <div class="metric-label">视频数量</div>
+          <div class="metric-value">{{ interactionData.video_count.toLocaleString() }}</div>
+        </div>
       </div>
     </el-card>
 
@@ -218,15 +290,8 @@
         </div>
       </template>
       <div class="spread-chart-wrapper">
-        <div v-if="spreadData?.graph_data?.nodes?.length" class="spread-nodes-grid">
-          <div v-for="(node, idx) in spreadData.graph_data.nodes.slice(0, 15)" :key="idx" class="spread-node-item">
-            <el-tag :type="['danger','warning','success','info'][idx % 4]" effect="plain" size="small">
-              <el-icon><Share /></el-icon> {{ node.name || node.platform || '未知节点' }}
-            </el-tag>
-            <span v-if="node.type" class="node-role">{{ {origin:'首发',amplifier:'放大',secondary:'传播'}[node.type] || node.type }}</span>
-          </div>
-        </div>
-        <el-empty v-else description="暂无传播链路数据" />
+        <!-- ECharts 力导向图容器 -->
+        <div ref="spreadChartRef" class="spread-chart-container" style="width: 100%; height: 400px;"></div>
       </div>
     </el-card>
 
@@ -463,6 +528,7 @@ import {
   ChatDotRound, InfoFilled, Clock, Refresh, TrendCharts, Histogram,
   Tickets, DataAnalysis, Lock, WarningFilled, CircleCheckFilled,
   Share, Document, Warning, Sunny, Cloudy, Lightning, MagicStick,
+  Edit, Check,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -477,6 +543,11 @@ const relatedNews = ref([])
 const emotionData = ref(null)
 const heatPrediction = ref(null)
 const actionAdvice = ref(null)
+
+// ==================== 概述编辑相关 ====================
+const isEditingSummary = ref(false)
+const editingSummaryText = ref('')
+const savingSummary = ref(false)
 
 // ==================== ECharts 图表实例 ====================
 const timelineChartRef = ref(null)
@@ -697,7 +768,7 @@ const credibilityScore = computed(() => {
   return analysisData.value?.credibility_score ?? null
 })
 
-// ==================== 传播链路关系图（已改为标签列表展示） ====================
+// ==================== 传播链路力导向图 ====================
 const formatNum = (n) => {
   if (n == null) return '0'
   if (n >= 10000) return (n / 10000).toFixed(1) + '万'
@@ -705,18 +776,190 @@ const formatNum = (n) => {
   return String(n)
 }
 
-const formattedSummary = computed(() => {
-  const raw = eventData.value?.summary || ''
-  if (!raw) return '<span style="color:#909399">暂无概述信息</span>'
-  // 将【标签】替换为彩色标签
-  return raw
-    .replace(/【时间】/g, '<b style="color:#409eff">时间:</b> ')
-    .replace(/【地点】/g, '<b style="color:#67c23a">地点:</b> ')
-    .replace(/【相关】/g, '<b style="color:#e6a23c">相关:</b> ')
-    .replace(/【概述】/g, '<b style="color:#7c3aed">概述:</b> ')
-    .replace(/【(\w+)】/g, '<b style="color:#409eff">$1:</b> ')
-    .replace(/\n/g, '<br>')
+// 力导向图 DOM 引用与实例
+const spreadChartRef = ref(null)
+let spreadChartInstance = null
+
+// 节点角色中文映射
+const nodeRoleMap = { origin: '首发', amplifier: '放大', secondary: '传播' }
+
+// 初始化传播链路力导向图
+function initSpreadChart() {
+  const graphData = spreadData.value?.graph_data
+  // 数据或 DOM 未就绪时不初始化
+  if (!spreadChartRef.value || !graphData || !graphData.nodes?.length) return
+
+  // 若已有实例，先销毁再重建，避免重复渲染
+  if (spreadChartInstance) {
+    spreadChartInstance.dispose()
+    spreadChartInstance = null
+  }
+
+  spreadChartInstance = echarts.init(spreadChartRef.value)
+  spreadChartInstance.setOption({
+    // 提示框：展示节点角色与平台信息
+    tooltip: {
+      formatter(params) {
+        if (params.dataType === 'node') {
+          const d = params.data || {}
+          const role = nodeRoleMap[d.type] || d.type || '未分类'
+          const lines = [`<b>${d.name || d.platform || '未知节点'}</b>`]
+          lines.push(`角色：${role}`)
+          if (d.platform) lines.push(`平台：${d.platform}`)
+          if (d.value != null) lines.push(`权重：${d.value}`)
+          return lines.join('<br/>')
+        }
+        if (params.dataType === 'edge') {
+          const d = params.data || {}
+          return `${d.source} → ${d.target}`
+        }
+        return params.name || ''
+      },
+    },
+    // 分类图例（从 categories 数据中取）
+    legend: [
+      {
+        data: (graphData.categories || []).map(c => c.name),
+        textStyle: { fontSize: 12, color: '#606266' },
+        bottom: 4,
+      },
+    ],
+    series: [
+      {
+        type: 'graph',
+        layout: 'force',
+        roam: true, // 允许拖拽缩放
+        categories: graphData.categories || [],
+        data: graphData.nodes || [], // symbolSize 从节点数据中取
+        links: graphData.links || [], // lineStyle 从边数据中取
+        // 节点标签
+        label: {
+          show: true,
+          position: 'right',
+          fontSize: 12,
+          color: '#303133',
+        },
+        // 边默认样式（可被数据中自带的 lineStyle 覆盖）
+        lineStyle: {
+          color: 'source',
+          curveness: 0.2,
+        },
+        // 鼠标悬浮高亮相邻节点
+        emphasis: {
+          focus: 'adjacency',
+          lineStyle: { width: 3 },
+          label: { fontWeight: 700 },
+        },
+        // 力导向参数
+        force: {
+          repulsion: 200,
+          edgeLength: 120,
+          gravity: 0.1,
+        },
+      },
+    ],
+  })
+}
+
+// 监听 spreadData 变化，数据就绪后初始化力导向图
+watch(spreadData, () => {
+  nextTick(() => {
+    initSpreadChart()
+  })
 })
+
+// 组件卸载时销毁力导向图实例，释放资源
+onBeforeUnmount(() => {
+  if (spreadChartInstance) {
+    spreadChartInstance.dispose()
+    spreadChartInstance = null
+  }
+})
+
+// ==================== 概述文本清理（去除 JSON、去除【标签】） ====================
+const cleanSummary = computed(() => {
+  let raw = eventData.value?.summary || ''
+  if (!raw) return ''
+  // 如果内容看起来像 JSON（包含 interaction_data 等），尝试提取纯文本
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    // 尝试解析为 JSON，如果是对象则显示为空（不展示原始 JSON）
+    try {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed === 'object') return ''
+    } catch { /* 不是合法 JSON，继续按文本处理 */ }
+  }
+  // 去除【时间】【地点】【相关】【概述】等标签，只保留纯文本
+  raw = raw.replace(/【(?:时间|地点|相关|概述|标签|来源|事件)】/g, '')
+  // 去除其他 【xxx】 格式标签
+  raw = raw.replace(/【[^】]+】/g, '')
+  // 去除行首空格
+  raw = raw.trim()
+  if (!raw) return ''
+  // 将换行转为 <br>
+  return raw.replace(/\n/g, '<br>')
+})
+
+// ==================== 交互数据相关 ====================
+const interactionData = computed(() => {
+  // 优先从 eventData 的 interaction_data 字段读取
+  return eventData.value?.interaction_data || null
+})
+
+// 情感标签映射：0=中性、1=正面、2=负面、3=其他
+const sentimentTagType = (label) => {
+  const map = { 0: 'info', 1: 'success', 2: 'danger', 3: 'warning' }
+  return map[label] ?? 'info'
+}
+const sentimentTagLabel = (label) => {
+  const map = { 0: '中性', 1: '正面', 2: '负面', 3: '其他' }
+  return map[label] ?? '未知'
+}
+
+// 来源渠道映射：0=推荐、1=搜索
+const sourceTagLabel = (source) => {
+  const map = { 0: '推荐', 1: '搜索' }
+  return map[source] ?? '未知'
+}
+
+// 热度值格式化（万为单位）
+const formatHeat = (val) => {
+  if (val == null) return '--'
+  if (val >= 10000) return (val / 10000).toFixed(0) + ' 万'
+  return val.toLocaleString()
+}
+
+// ==================== 概述编辑方法 ====================
+const startEditSummary = () => {
+  editingSummaryText.value = eventData.value?.summary || ''
+  isEditingSummary.value = true
+}
+const cancelEditSummary = () => {
+  isEditingSummary.value = false
+  editingSummaryText.value = ''
+}
+const saveSummary = async () => {
+  savingSummary.value = true
+  try {
+    const token = localStorage.getItem('token')
+    const res = await axios.put(`/api/events/${eventId}/summary`, {
+      summary: editingSummaryText.value,
+    }, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (res.data.code === 200 || res.status === 200) {
+      // 更新本地数据
+      eventData.value = { ...eventData.value, summary: editingSummaryText.value }
+      isEditingSummary.value = false
+      ElMessage.success('概述已保存')
+    } else {
+      ElMessage.error(res.data.msg || '保存失败')
+    }
+  } catch (err) {
+    ElMessage.error('保存概述失败：' + (err.response?.data?.detail || err.message))
+  } finally {
+    savingSummary.value = false
+  }
+}
 
 const credibilityLevel = computed(() => {
   const s = credibilityScore.value
@@ -857,6 +1100,66 @@ onMounted(loadEvent)
 .event-summary-text { display: flex; gap: 8px; align-items: flex-start; color: #606266; font-size: 14px; line-height: 1.8; margin: 12px 0; }
 .event-meta { display: flex; gap: 24px; color: #a0a4ad; font-size: 13px; }
 .event-meta span { display: flex; align-items: center; gap: 4px; }
+
+/* ========== 概述编辑区域 ========== */
+.summary-text-area { margin: 4px 0; }
+.summary-edit-row { display: flex; justify-content: flex-end; margin-top: 4px; }
+.summary-edit-input { margin-top: 8px; }
+.summary-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.no-summary-hint { color: #909399; font-style: italic; }
+
+/* ========== 交互数据指标卡片 ========== */
+.interaction-card { margin-bottom: 16px; }
+.interaction-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+.interaction-metric-item {
+  background: #f8f9fb;
+  border-radius: 12px;
+  padding: 20px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.interaction-metric-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.metric-label {
+  font-size: 13px;
+  color: #909399;
+  font-weight: 500;
+}
+.metric-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: #303133;
+  line-height: 1.2;
+}
+.metric-tag {
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 20px;
+}
+.metric-sub {
+  font-size: 11px;
+  color: #b0b3ba;
+}
+.heat-metric {
+  background: linear-gradient(135deg, #eef3ff 0%, #f0eaff 100%);
+  border: 1px solid #e6e9f5;
+}
+.heat-value {
+  background: linear-gradient(135deg, #409eff, #66b1ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 
 /* ========== 图表卡片 ========== */
 .chart-card { margin-bottom: 16px; }
@@ -1036,6 +1339,12 @@ onMounted(loadEvent)
 }
 .spread-chart {
   height: 400px;
+}
+.spread-chart-container {
+  width: 100%;
+  height: 400px;
+  background: linear-gradient(135deg, #f5f7ff 0%, #f0eaff 50%, #eef1ff 100%);
+  border-radius: 12px;
 }
 .spread-nodes-grid {
   display: flex;

@@ -403,7 +403,20 @@ def promote_hotspots_to_events(hotspots: list) -> int:
                     (news_ids[0],),
                 ).fetchone()
                 if first_news and first_news["content"]:
-                    summary = first_news["content"][:200].strip()
+                    raw_content = first_news["content"]
+                    # 如果 content 是 JSON 则清空
+                    if raw_content.strip().startswith("{"):
+                        raw_content = ""
+                else:
+                    raw_content = ""
+
+            # 生成事件概述（优先 LLM，保证是纯文字）
+            try:
+                from app.services.event_summarizer import generate_llm_summary
+                summary = generate_llm_summary(title, raw_content)
+            except Exception as e:
+                logger.warning("LLM 概述生成失败: %s", e)
+                summary = title
 
             # 计算热度分数
             heat_score = min(100.0, hotspot["news_count"] * 10)
