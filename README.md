@@ -65,7 +65,6 @@
 - 多维度画像分析：地域分布、兴趣圈层、年龄段、品牌人群分层
 - 传播图谱可视化（ECharts 力导向图）
 - 模糊账号复核面板（支持隐藏水军节点）
-- 基于 DeepSeek LLM 的逼真虚拟用户生成（用户名、简介、评论内容）
 - 画像结果一键导出图片
 
 ### 报表自动生成
@@ -186,7 +185,7 @@ npm install
    ```bash
    export HF_ENDPOINT=https://hf-mirror.com
    ```
-3. DeepSeek LLM 配置（用于事件概述、情感分析、平台分布推算、虚拟用户生成）：
+3. DeepSeek LLM 配置（用于事件概述、情感分析、平台分布推算）：
    ```bash
    export DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
@@ -269,7 +268,7 @@ GET /api/reports/event/{event_id}?format=docx
 | KMeans | scikit-learn | 新闻聚类 + 轮廓系数评估 |
 | TF-IDF | jieba.analyse | 关键词提取与特征表示 |
 | 语义搜索 | 余弦相似度 | 智能问答、事件关联、关键词扩展 |
-| DeepSeek LLM | deepseek-chat | 事件概述、情感分析、平台分布推算、虚拟用户生成 |
+| DeepSeek LLM | deepseek-chat | 事件概述、情感分析、平台分布推算 |
 
 ## License
 
